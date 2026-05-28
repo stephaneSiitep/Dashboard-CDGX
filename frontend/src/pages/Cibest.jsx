@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { API_URL } from '../config';
 import DataTable from '../components/DataTable/DataTable';
 import DonutChart from '../components/DonutChart/DonutChart';
 import BarChart from '../components/BarChart/BarChart';
@@ -51,7 +52,7 @@ const Cibest = () => {
   const fetchEquipementData = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:3000/api/cibest/equipements');
+      const response = await fetch('${API_URL}/api/cibest/equipements');
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -77,7 +78,7 @@ const Cibest = () => {
   // Function to fetch status summary
   const fetchStatusSummary = async () => {
     try {
-      const response = await fetch('http://localhost:3000/api/cibest/equipements/status');
+      const response = await fetch('${API_URL}/api/cibest/equipements/status');
       
       if (response.ok) {
         const result = await response.json();

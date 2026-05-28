@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
+import { API_URL } from './config';
 
 function App() {
   useEffect(() => {
     // Function to fetch data
     const fetchData = () => {
-      fetch('http://localhost:3000/data')
+      fetch(`${API_URL}/data`)
         .then((res) => res.json())
         .then((data) => {
           console.log('Fetched data from backend:', data);

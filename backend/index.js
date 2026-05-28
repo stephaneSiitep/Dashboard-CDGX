@@ -5,6 +5,11 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const { Pool } = require('pg');
+const rateLimit = require('express-rate-limit');
+const pino = require('pino');
+const pinoHttp = require('pino-http');
+
+const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -12,6 +17,32 @@ const app = express();
 const port = process.env.PORT || 3000;
 const host = process.env.HOST || '0.0.0.0';
 const JWT_SECRET = process.env.JWT_SECRET || 'cibest_secret_key_change_in_production';
+
+// CORS — origines autorisees configurables via ALLOWED_ORIGINS (CSV)
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : ['http://localhost:5173', 'http://localhost:3000'];
+
+app.use(cors({
+  origin: (origin, cb) => {
+    // Autoriser les appels sans origin (outils, Postman) et les origines reconnues
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    cb(new Error(`CORS: origine non autorisee — ${origin}`));
+  },
+  credentials: true,
+}));
+
+// Rate limiting sur le login — 10 tentatives par 15 minutes par IP
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Trop de tentatives, reessayez dans 15 minutes.' },
+});
+
+// HTTP request logger
+app.use(pinoHttp({ logger }));
 
 // PostgreSQL connection
 const pool = new Pool({
@@ -61,16 +92,16 @@ const seedAdmin = async () => {
         `INSERT INTO users (username, email, password_hash, role) VALUES ($1, $2, $3, $4)`,
         ['admin', 'admin@cibest.local', hash, 'admin']
       );
-      console.log('✅ Compte admin par défaut créé (admin / Admin123!)');
+      logger.info('Compte admin par defaut cree (admin / Admin123!)');
     }
   } catch (err) {
-    console.error('⚠️  Seed admin échoué (table peut-être absente):', err.message);
+    logger.warn({ err: err.message }, 'Seed admin echoue (table peut-etre absente)');
   }
 };
 
 // ─── Auth Routes ─────────────────────────────────────────────────────────────
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
     return res.status(400).json({ success: false, error: 'Identifiants requis' });
@@ -106,7 +137,7 @@ app.post('/api/auth/login', async (req, res) => {
       user: { id: user.id, username: user.username, email: user.email, role: user.role },
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     res.status(500).json({ success: false, error: 'Erreur serveur' });
   }
 });
@@ -369,7 +400,7 @@ app.get('/api/cibest/equipements', async (req, res) => {
       total_equipements: result.rowCount,
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     res.status(500).json({ success: false, error: 'DB query failed' });
   }
 });
@@ -400,7 +431,7 @@ app.get('/api/cibest/equipements/status', async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     res.status(500).json({ success: false, error: 'DB query failed' });
   }
 });
@@ -423,7 +454,75 @@ app.get('/api/cibest/equipements/:equipementId', async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
+    res.status(500).json({ success: false, error: 'DB query failed' });
+  }
+});
+
+// Historical RTT data for a given IP — used by TimelinePerformance
+// GET /api/cibest/history?ip=10.x.x.x&range=1h|6h|24h
+app.get('/api/cibest/history', async (req, res) => {
+  const { ip, range } = req.query;
+
+  if (!ip) {
+    return res.status(400).json({ success: false, error: 'Parametre ip requis' });
+  }
+
+  const hours = range === '6h' ? 6 : range === '24h' ? 24 : 1;
+
+  try {
+    const result = await pool.query(
+      `SELECT ip, name, reachable, rtt_ms, ttl, timestamp
+       FROM ping_results
+       WHERE ip = $1
+         AND timestamp >= NOW() - INTERVAL '${hours} hours'
+       ORDER BY timestamp ASC`,
+      [ip]
+    );
+
+    res.json({
+      success: true,
+      ip,
+      range: `${hours}h`,
+      data: result.rows,
+    });
+  } catch (err) {
+    logger.error({ err });
+    res.status(500).json({ success: false, error: 'DB query failed' });
+  }
+});
+
+// Aggregated history for all equipements (average RTT per time bucket)
+// GET /api/cibest/history/all?range=1h|6h|24h
+app.get('/api/cibest/history/all', async (req, res) => {
+  const { range } = req.query;
+  const hours = range === '6h' ? 6 : range === '24h' ? 24 : 1;
+  const bucket = hours <= 1 ? '5 minutes' : hours <= 6 ? '15 minutes' : '1 hour';
+
+  try {
+    const result = await pool.query(
+      `SELECT
+         date_trunc('minute', timestamp) - (
+           EXTRACT(minute FROM timestamp)::int % $1
+         ) * INTERVAL '1 minute' AS bucket,
+         ROUND(AVG(rtt_ms)::numeric, 2) AS avg_rtt,
+         COUNT(*) FILTER (WHERE reachable = 'true') AS online_count,
+         COUNT(*) AS total_count
+       FROM ping_results
+       WHERE timestamp >= NOW() - INTERVAL '${hours} hours'
+       GROUP BY bucket
+       ORDER BY bucket ASC`,
+      [hours <= 1 ? 5 : hours <= 6 ? 15 : 60]
+    );
+
+    res.json({
+      success: true,
+      range: `${hours}h`,
+      bucket,
+      data: result.rows,
+    });
+  } catch (err) {
+    logger.error({ err });
     res.status(500).json({ success: false, error: 'DB query failed' });
   }
 });
@@ -450,38 +549,34 @@ app.get('/api/health', async (req, res) => {
 
 pool.connect(async (err, client, release) => {
   if (err) {
-    console.error('❌ Error connecting to database:', err);
+    logger.error({ err }, 'Erreur de connexion a la base de donnees');
   } else {
-    console.log('✅ Database connection successful');
+    logger.info('Connexion PostgreSQL etablie');
     release();
     await seedAdmin();
   }
 });
 
 pool.on('error', (err) => {
-  console.error('❌ Unexpected error on idle client:', err);
+  logger.error({ err }, 'Erreur inattendue sur client idle');
 });
 
 // ─── Server ───────────────────────────────────────────────────────────────────
 
 const server = app.listen(port, host, () => {
-  console.log(`🚀 API server running at http://${host}:${port}`);
+  logger.info(`API server running at http://${host}:${port}`);
 });
 
 server.on('error', (err) => {
-  console.error('❌ Server error:', err);
+  logger.error({ err }, 'Erreur serveur');
 });
 
 process.on('SIGTERM', () => {
-  console.log('🛑 SIGTERM received, shutting down gracefully');
-  server.close(() => {
-    pool.end(() => process.exit(0));
-  });
+  logger.info('SIGTERM recu, arret gracieux');
+  server.close(() => { pool.end(() => process.exit(0)); });
 });
 
 process.on('SIGINT', () => {
-  console.log('🛑 SIGINT received, shutting down gracefully');
-  server.close(() => {
-    pool.end(() => process.exit(0));
-  });
+  logger.info('SIGINT recu, arret gracieux');
+  server.close(() => { pool.end(() => process.exit(0)); });
 });

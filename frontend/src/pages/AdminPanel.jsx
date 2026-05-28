@@ -1,16 +1,52 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { API_URL } from '../config';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faUsers, faNetworkWired, faPlus, faEdit, faTrash,
   faSignOutAlt, faTachometerAlt, faShieldAlt, faCheck,
   faTimes, faEye, faEyeSlash, faToggleOn, faToggleOff,
   faSearch, faMoon, faSun, faFileExcel, faFileImport,
-  faDownload, faSpinner,
+  faDownload, faSpinner, faChevronLeft, faChevronRight,
 } from '@fortawesome/free-solid-svg-icons';
 
-const API = 'http://localhost:3000';
+const PAGE_SIZE = 10;
+
+const Pagination = ({ page, total, pageSize, onChange, darkMode }) => {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (totalPages <= 1) return null;
+  const subtext = darkMode ? 'text-gray-400' : 'text-gray-500';
+  const start = (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, total);
+  const pages = Array.from({ length: totalPages }, (_, i) => i + 1)
+    .filter(n => n === 1 || n === totalPages || Math.abs(n - page) <= 1)
+    .reduce((acc, n, i, arr) => { if (i > 0 && n - arr[i - 1] > 1) acc.push('…'); acc.push(n); return acc; }, []);
+  return (
+    <div className={`flex items-center justify-between mt-3 pt-3 border-t text-xs ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+      <span className={subtext}>{start}–{end} sur {total}</span>
+      <div className="flex items-center gap-1">
+        <button onClick={() => onChange(page - 1)} disabled={page === 1}
+          className={`p-1.5 rounded-lg transition ${page === 1 ? 'opacity-30 cursor-not-allowed' : darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}>
+          <FontAwesomeIcon icon={faChevronLeft} />
+        </button>
+        {pages.map((n, i) => n === '…'
+          ? <span key={`e${i}`} className={`px-1 ${subtext}`}>…</span>
+          : <button key={n} onClick={() => onChange(n)}
+              className={`w-6 h-6 rounded-lg font-medium transition ${n === page ? 'bg-blue-600 text-white' : darkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'}`}>
+              {n}
+            </button>
+        )}
+        <button onClick={() => onChange(page + 1)} disabled={page === totalPages}
+          className={`p-1.5 rounded-lg transition ${page === totalPages ? 'opacity-30 cursor-not-allowed' : darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}>
+          <FontAwesomeIcon icon={faChevronRight} />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const API = API_URL;
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 const Toast = ({ message, type, onClose }) => {
@@ -322,6 +358,10 @@ const AdminPanel = () => {
   const [userSearch, setUserSearch] = useState('');
   const [equipSearch, setEquipSearch] = useState('');
 
+  // Pagination
+  const [userPage, setUserPage] = useState(1);
+  const [equipPage, setEquipPage] = useState(1);
+
   // Import
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null); // { added, skipped, errors[] }
@@ -492,16 +532,18 @@ const AdminPanel = () => {
     }
   };
 
-  // ── Filtered lists ──
+  // ── Filtered + paginated lists ──
   const filteredUsers = users.filter(u =>
     u.username.toLowerCase().includes(userSearch.toLowerCase()) ||
     u.email.toLowerCase().includes(userSearch.toLowerCase())
   );
+  const pagedUsers = filteredUsers.slice((userPage - 1) * PAGE_SIZE, userPage * PAGE_SIZE);
 
   const filteredEquipements = equipements.filter(e =>
     e.name.toLowerCase().includes(equipSearch.toLowerCase()) ||
     e.ip.includes(equipSearch)
   );
+  const pagedEquipements = filteredEquipements.slice((equipPage - 1) * PAGE_SIZE, equipPage * PAGE_SIZE);
 
   const bg = darkMode ? 'bg-gray-900' : 'bg-gray-100';
   const card = darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200';
@@ -593,7 +635,7 @@ const AdminPanel = () => {
                   <div className="relative">
                     <FontAwesomeIcon icon={faSearch}
                       className={`absolute left-3 top-1/2 -translate-y-1/2 text-xs ${subtext}`} />
-                    <input value={userSearch} onChange={e => setUserSearch(e.target.value)}
+                    <input value={userSearch} onChange={e => { setUserSearch(e.target.value); setUserPage(1); }}
                       placeholder="Rechercher..."
                       className={`${inputClass} border rounded-lg pl-8 pr-4 py-2 text-sm w-56 focus:outline-none focus:border-blue-500 transition`} />
                   </div>
@@ -617,13 +659,13 @@ const AdminPanel = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredUsers.length === 0 ? (
+                      {pagedUsers.length === 0 ? (
                         <tr>
                           <td colSpan={6} className={`px-4 py-8 text-center text-sm ${subtext}`}>
                             {loadingData ? 'Chargement...' : 'Aucun utilisateur trouvé'}
                           </td>
                         </tr>
-                      ) : filteredUsers.map(u => (
+                      ) : pagedUsers.map(u => (
                         <tr key={u.id} className={`${tableRow} border-b transition`}>
                           <td className={`px-4 py-3 font-medium ${text}`}>
                             <div className="flex items-center gap-2">
@@ -671,6 +713,7 @@ const AdminPanel = () => {
                     </tbody>
                   </table>
                 </div>
+                <Pagination page={userPage} total={filteredUsers.length} pageSize={PAGE_SIZE} onChange={setUserPage} darkMode={darkMode} />
               </>
             )}
 
@@ -681,7 +724,7 @@ const AdminPanel = () => {
                   <div className="relative">
                     <FontAwesomeIcon icon={faSearch}
                       className={`absolute left-3 top-1/2 -translate-y-1/2 text-xs ${subtext}`} />
-                    <input value={equipSearch} onChange={e => setEquipSearch(e.target.value)}
+                    <input value={equipSearch} onChange={e => { setEquipSearch(e.target.value); setEquipPage(1); }}
                       placeholder="Rechercher par nom ou IP..."
                       className={`${inputClass} border rounded-lg pl-8 pr-4 py-2 text-sm w-56 focus:outline-none focus:border-blue-500 transition`} />
                   </div>
@@ -752,13 +795,13 @@ const AdminPanel = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredEquipements.length === 0 ? (
+                      {pagedEquipements.length === 0 ? (
                         <tr>
                           <td colSpan={7} className={`px-4 py-8 text-center text-sm ${subtext}`}>
                             {loadingData ? 'Chargement...' : 'Aucun équipement trouvé'}
                           </td>
                         </tr>
-                      ) : filteredEquipements.map(e => (
+                      ) : pagedEquipements.map(e => (
                         <tr key={e.id} className={`${tableRow} border-b transition`}>
                           <td className={`px-4 py-3 font-medium ${text}`}>
                             <div className="flex items-center gap-2">
@@ -804,6 +847,7 @@ const AdminPanel = () => {
                     </tbody>
                   </table>
                 </div>
+                <Pagination page={equipPage} total={filteredEquipements.length} pageSize={PAGE_SIZE} onChange={setEquipPage} darkMode={darkMode} />
               </>
             )}
           </div>
