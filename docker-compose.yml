@@ -13,13 +13,6 @@ services:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "5432:5432"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cdgxpress_user -d cdgxpress"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
 
   backend:
     build: ./backend
@@ -29,20 +22,11 @@ services:
     ports:
       - "3000:3000"
     environment:
-      POSTGRES_HOST: db
-      POSTGRES_USER: cdgxpress_user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: cdgxpress
-      POSTGRES_PORT: 5432
-      HOST: 0.0.0.0
-      PORT: 3000
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      DB_HOST: db
+      DB_USER: cdgxpress_user
+      DB_PASSWORD: password
+      DB_NAME: cdgxpress
+      DB_PORT: 5432
 
 
 

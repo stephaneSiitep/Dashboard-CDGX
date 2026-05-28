@@ -9,29 +9,29 @@ import {
   faExpand
 } from '@fortawesome/free-solid-svg-icons';
 
-const NetworkTopology = ({ cameras, darkMode = false, title = "Network Topology" }) => {
-  const [selectedCamera, setSelectedCamera] = useState(null);
+const NetworkTopology = ({ equipements, darkMode = false, title = "Network Topology" }) => {
+  const [selectedEquipement, setSelectedEquipement] = useState(null);
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'network'
   const [animationEnabled, setAnimationEnabled] = useState(true);
 
-  // Group cameras by subnet for network view
-  const groupCamerasBySubnet = () => {
+  // Group equipements by subnet for network view
+  const groupEquipementsBySubnet = () => {
     const subnets = {};
-    cameras.forEach(camera => {
-      const subnet = camera.ip.split('.').slice(0, 3).join('.');
+    equipements.forEach(eq => {
+      const subnet = eq.ip.split('.').slice(0, 3).join('.');
       if (!subnets[subnet]) {
         subnets[subnet] = [];
       }
-      subnets[subnet].push(camera);
+      subnets[subnet].push(eq);
     });
     return subnets;
   };
 
-  const subnets = groupCamerasBySubnet();
+  const subnets = groupEquipementsBySubnet();
 
   // Calculate grid dimensions
   const getGridDimensions = () => {
-    const count = cameras.length;
+    const count = equipements.length;
     const cols = Math.ceil(Math.sqrt(count));
     const rows = Math.ceil(count / cols);
     return { cols, rows };
@@ -40,9 +40,9 @@ const NetworkTopology = ({ cameras, darkMode = false, title = "Network Topology"
   const { cols, rows } = getGridDimensions();
 
   // Get status color
-  const getStatusColor = (camera) => {
-    if (camera.reachable === 'true') {
-      const rtt = camera.rtt_ms || 0;
+  const getStatusColor = (eq) => {
+    if (eq.reachable === 'true') {
+      const rtt = eq.rtt_ms || 0;
       if (rtt < 30) return 'text-green-500 bg-green-500/20 border-green-500';
       if (rtt < 60) return 'text-yellow-500 bg-yellow-500/20 border-yellow-500';
       return 'text-orange-500 bg-orange-500/20 border-orange-500';
@@ -51,56 +51,56 @@ const NetworkTopology = ({ cameras, darkMode = false, title = "Network Topology"
   };
 
   // Get pulse animation class
-  const getPulseClass = (camera) => {
+  const getPulseClass = (eq) => {
     if (!animationEnabled) return '';
-    if (camera.reachable === 'true') {
+    if (eq.reachable === 'true') {
       return 'animate-pulse';
     }
     return 'animate-bounce';
   };
 
-  const CameraNode = ({ camera, index }) => {
-    const statusColor = getStatusColor(camera);
-    const pulseClass = getPulseClass(camera);
-    
+  const EquipementNode = ({ eq, index }) => {
+    const statusColor = getStatusColor(eq);
+    const pulseClass = getPulseClass(eq);
+
     return (
       <div
         className={`relative group cursor-pointer transition-all duration-300 transform hover:scale-110
-          ${selectedCamera?.id === camera.id ? 'scale-110 z-10' : ''}`}
-        onClick={() => setSelectedCamera(selectedCamera?.id === camera.id ? null : camera)}
+          ${selectedEquipement?.id === eq.id ? 'scale-110 z-10' : ''}`}
+        onClick={() => setSelectedEquipement(selectedEquipement?.id === eq.id ? null : eq)}
       >
-        {/* Camera Node */}
+        {/* Equipement Node */}
         <div className={`w-16 h-16 rounded-xl border-2 flex items-center justify-center
           ${statusColor} ${pulseClass}
           hover:shadow-lg transition-all duration-300
-          ${selectedCamera?.id === camera.id ? 'ring-4 ring-blue-500/50' : ''}`}
+          ${selectedEquipement?.id === eq.id ? 'ring-4 ring-blue-500/50' : ''}`}
         >
-          <FontAwesomeIcon 
-            icon={faCamera} 
+          <FontAwesomeIcon
+            icon={faCamera}
             className="text-xl"
           />
         </div>
-        
-        {/* Camera Label */}
+
+        {/* Equipement Label */}
         <div className={`absolute -bottom-8 left-1/2 transform -translate-x-1/2 text-xs font-medium
           ${darkMode ? 'text-gray-300' : 'text-gray-600'}
           group-hover:font-bold transition-all duration-200`}
         >
-          {camera.name.replace('Camera ', 'C')}
+          {eq.name.replace('Equipement ', 'E')}
         </div>
-        
+
         {/* RTT Badge */}
-        {camera.reachable === 'true' && camera.rtt_ms && (
+        {eq.reachable === 'true' && eq.rtt_ms && (
           <div className={`absolute -top-2 -right-2 px-2 py-1 rounded-full text-xs font-bold
-            ${camera.rtt_ms < 30 ? 'bg-green-500 text-white' :
-              camera.rtt_ms < 60 ? 'bg-yellow-500 text-black' : 'bg-orange-500 text-white'}`}
+            ${eq.rtt_ms < 30 ? 'bg-green-500 text-white' :
+              eq.rtt_ms < 60 ? 'bg-yellow-500 text-black' : 'bg-orange-500 text-white'}`}
           >
-            {camera.rtt_ms}ms
+            {eq.rtt_ms}ms
           </div>
         )}
-        
+
         {/* Error Indicator */}
-        {camera.reachable === 'false' && (
+        {eq.reachable === 'false' && (
           <div className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center">
             <FontAwesomeIcon icon={faExclamationTriangle} className="text-white text-xs" />
           </div>
@@ -117,15 +117,15 @@ const NetworkTopology = ({ cameras, darkMode = false, title = "Network Topology"
         minHeight: '400px'
       }}
     >
-      {cameras.map((camera, index) => (
-        <CameraNode key={camera.id} camera={camera} index={index} />
+      {equipements.map((eq, index) => (
+        <EquipementNode key={eq.id} eq={eq} index={index} />
       ))}
     </div>
   );
 
   const NetworkView = () => (
     <div className="p-8 space-y-8">
-      {Object.entries(subnets).map(([subnet, subnetCameras]) => (
+      {Object.entries(subnets).map(([subnet, subnetEquipements]) => (
         <div key={subnet} className={`p-6 rounded-lg border
           ${darkMode ? 'bg-gray-700/50 border-gray-600' : 'bg-gray-50 border-gray-200'}`}
         >
@@ -137,13 +137,13 @@ const NetworkTopology = ({ cameras, darkMode = false, title = "Network Topology"
             <span className={`px-3 py-1 rounded-full text-sm font-medium
               ${darkMode ? 'bg-blue-900/50 text-blue-300' : 'bg-blue-100 text-blue-800'}`}
             >
-              {subnetCameras.length} cameras
+              {subnetEquipements.length} équipements
             </span>
           </div>
-          
+
           <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-6">
-            {subnetCameras.map((camera, index) => (
-              <CameraNode key={camera.id} camera={camera} index={index} />
+            {subnetEquipements.map((eq, index) => (
+              <EquipementNode key={eq.id} eq={eq} index={index} />
             ))}
           </div>
         </div>
@@ -231,39 +231,39 @@ const NetworkTopology = ({ cameras, darkMode = false, title = "Network Topology"
         {viewMode === 'grid' ? <GridView /> : <NetworkView />}
       </div>
 
-      {/* Selected Camera Details */}
-      {selectedCamera && (
+      {/* Selected Equipement Details */}
+      {selectedEquipement && (
         <div className={`p-6 border-t border-gray-200 dark:border-gray-700
           ${darkMode ? 'bg-gray-700/50' : 'bg-gray-50'}`}
         >
           <div className="flex items-start justify-between">
             <div>
-              <h3 className="text-lg font-semibold mb-2">{selectedCamera.name}</h3>
+              <h3 className="text-lg font-semibold mb-2">{selectedEquipement.name}</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                 <div>
                   <span className="font-medium">IP Address:</span>
-                  <div className="font-mono">{selectedCamera.ip}</div>
+                  <div className="font-mono">{selectedEquipement.ip}</div>
                 </div>
                 <div>
-                  <span className="font-medium">Status:</span>
+                  <span className="font-medium">Statut:</span>
                   <div className={`font-medium ${
-                    selectedCamera.reachable === 'true' ? 'text-green-500' : 'text-red-500'
+                    selectedEquipement.reachable === 'true' ? 'text-green-500' : 'text-red-500'
                   }`}>
-                    {selectedCamera.reachable === 'true' ? 'Online' : 'Offline'}
+                    {selectedEquipement.reachable === 'true' ? 'Online' : 'Offline'}
                   </div>
                 </div>
                 <div>
-                  <span className="font-medium">Response Time:</span>
-                  <div>{selectedCamera.rtt_ms ? `${selectedCamera.rtt_ms}ms` : 'N/A'}</div>
+                  <span className="font-medium">Temps de réponse:</span>
+                  <div>{selectedEquipement.rtt_ms ? `${selectedEquipement.rtt_ms}ms` : 'N/A'}</div>
                 </div>
                 <div>
                   <span className="font-medium">TTL:</span>
-                  <div>{selectedCamera.ttl || 'N/A'}</div>
+                  <div>{selectedEquipement.ttl || 'N/A'}</div>
                 </div>
               </div>
             </div>
             <button
-              onClick={() => setSelectedCamera(null)}
+              onClick={() => setSelectedEquipement(null)}
               className={`px-3 py-1 rounded text-sm font-medium transition-colors
                 ${darkMode ? 'bg-gray-600 hover:bg-gray-500 text-gray-300' : 'bg-gray-200 hover:bg-gray-300 text-gray-700'}`}
             >

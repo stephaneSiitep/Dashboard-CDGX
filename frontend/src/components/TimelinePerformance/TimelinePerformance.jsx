@@ -3,8 +3,8 @@ import ReactApexChart from 'react-apexcharts';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChartLine, faFilter, faClock } from '@fortawesome/free-solid-svg-icons';
 
-const TimelinePerformance = ({ cameras, darkMode = false, title = "Equipment Performance Timeline" }) => {
-  const [selectedCamera, setSelectedCamera] = useState('all');
+const TimelinePerformance = ({ equipements, darkMode = false, title = "Equipment Performance Timeline" }) => {
+  const [selectedEquipement, setSelectedEquipement] = useState('all');
   const [performanceData, setPerformanceData] = useState([]);
   const [timeRange, setTimeRange] = useState('1h'); // 1h, 6h, 24h
 
@@ -31,17 +31,17 @@ const TimelinePerformance = ({ cameras, darkMode = false, title = "Equipment Per
   };
 
   useEffect(() => {
-    if (cameras.length === 0) return;
+    if (equipements.length === 0) return;
 
     const hours = timeRange === '1h' ? 1 : timeRange === '6h' ? 6 : 24;
-    
-    if (selectedCamera === 'all') {
-      // Show average performance of all cameras
-      const allData = generateHistoricalData(cameras[0], hours);
+
+    if (selectedEquipement === 'all') {
+      // Show average performance of all equipements
+      const allData = generateHistoricalData(equipements[0], hours);
       const avgData = allData.map(point => {
-        const onlineCameras = cameras.filter(cam => cam.reachable === 'true');
-        const avgRtt = onlineCameras.length > 0 
-          ? onlineCameras.reduce((sum, cam) => sum + (cam.rtt_ms || 30), 0) / onlineCameras.length
+        const onlineEquipements = equipements.filter(eq => eq.reachable === 'true');
+        const avgRtt = onlineEquipements.length > 0
+          ? onlineEquipements.reduce((sum, eq) => sum + (eq.rtt_ms || 30), 0) / onlineEquipements.length
           : null;
         
         return {
@@ -52,13 +52,13 @@ const TimelinePerformance = ({ cameras, darkMode = false, title = "Equipment Per
       });
       setPerformanceData([{ name: 'Average RTT', data: avgData }]);
     } else {
-      const camera = cameras.find(cam => cam.id.toString() === selectedCamera);
-      if (camera) {
-        const data = generateHistoricalData(camera, hours);
-        setPerformanceData([{ name: camera.name, data }]);
+      const equipement = equipements.find(eq => eq.id.toString() === selectedEquipement);
+      if (equipement) {
+        const data = generateHistoricalData(equipement, hours);
+        setPerformanceData([{ name: equipement.name, data }]);
       }
     }
-  }, [selectedCamera, cameras, timeRange]);
+  }, [selectedEquipement, equipements, timeRange]);
 
   const chartOptions = {
     chart: {
@@ -134,18 +134,18 @@ const TimelinePerformance = ({ cameras, darkMode = false, title = "Equipment Per
           <div className="flex items-center gap-2">
             <FontAwesomeIcon icon={faFilter} className="text-gray-500" />
             <select
-              value={selectedCamera}
-              onChange={(e) => setSelectedCamera(e.target.value)}
+              value={selectedEquipement}
+              onChange={(e) => setSelectedEquipement(e.target.value)}
               className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors
                 ${darkMode
                   ? 'bg-gray-700 border-gray-600 text-white focus:border-blue-500'
                   : 'bg-white border-gray-300 text-gray-900 focus:border-blue-500'}
                 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
             >
-              <option value="all">All Cameras (Average)</option>
-              {cameras.map(camera => (
-                <option key={camera.id} value={camera.id.toString()}>
-                  {camera.name} ({camera.ip})
+              <option value="all">Tous les Equipements (Moyenne)</option>
+              {equipements.map(eq => (
+                <option key={eq.id} value={eq.id.toString()}>
+                  {eq.name} ({eq.ip})
                 </option>
               ))}
             </select>
@@ -188,9 +188,9 @@ const TimelinePerformance = ({ cameras, darkMode = false, title = "Equipment Per
           <div>
             <span className="font-medium">Equipment:</span>
             <span className="ml-2">
-              {selectedCamera === 'all' 
-                ? `All Cameras (${cameras.length} total)`
-                : cameras.find(cam => cam.id.toString() === selectedCamera)?.name || 'Unknown'
+              {selectedEquipement === 'all'
+                ? `Tous les Equipements (${equipements.length} total)`
+                : equipements.find(eq => eq.id.toString() === selectedEquipement)?.name || 'Unknown'
               }
             </span>
           </div>
@@ -203,15 +203,15 @@ const TimelinePerformance = ({ cameras, darkMode = false, title = "Equipment Per
           <div>
             <span className="font-medium">Current Status:</span>
             <span className={`ml-2 font-medium ${
-              selectedCamera === 'all'
-                ? cameras.filter(cam => cam.reachable === 'true').length > cameras.length / 2
+              selectedEquipement === 'all'
+                ? equipements.filter(eq => eq.reachable === 'true').length > equipements.length / 2
                   ? 'text-green-500' : 'text-red-500'
-                : cameras.find(cam => cam.id.toString() === selectedCamera)?.reachable === 'true'
+                : equipements.find(eq => eq.id.toString() === selectedEquipement)?.reachable === 'true'
                   ? 'text-green-500' : 'text-red-500'
             }`}>
-              {selectedCamera === 'all'
-                ? `${cameras.filter(cam => cam.reachable === 'true').length}/${cameras.length} Online`
-                : cameras.find(cam => cam.id.toString() === selectedCamera)?.reachable === 'true'
+              {selectedEquipement === 'all'
+                ? `${equipements.filter(eq => eq.reachable === 'true').length}/${equipements.length} Online`
+                : equipements.find(eq => eq.id.toString() === selectedEquipement)?.reachable === 'true'
                   ? 'Online' : 'Offline'
               }
             </span>
