@@ -9,7 +9,7 @@ Cibest est un tableau de bord de supervision en temps réel conçu pour surveill
 Le système répond à un besoin opérationnel précis : disposer d'une vue unifiée sur l'état de santé des équipements embarqués dans les trains et dans les infrastructures fixes. Trois sources d'information convergent vers ce dashboard :
 
 - **Le serveur MDR6**, qui remonte les données de présence et d'état des trains.
-- **Le serveur IA**, qui remonte les données de comptage de passagers issues des caméras intelligentes.
+- **Le serveur IA (CVEDIA)**, qui remonte les données de comptage de passagers issues des caméras intelligentes.
 - **La supervision réseau directe**, via un service de ping continu qui sonde les équipements toutes les cinq minutes et enregistre leur disponibilité et leur latence.
 
 Le client a également souhaité disposer d'un panneau d'administration permettant de gérer les utilisateurs ayant accès à la plateforme, ainsi que le référentiel des équipements supervisés.
@@ -27,7 +27,7 @@ Cibest/
 └── docker-compose.yml
 ```
 
-L'application repose sur trois services distincts :
+L'application repose sur quatre services orchestrés par Docker Compose :
 
 | Service | Technologie | Rôle |
 |---------|-------------|------|
@@ -49,14 +49,14 @@ Quatre cartes affichent en temps réel le nombre total d'équipements, le nombre
 
 **Visualisations graphiques**
 - Un graphique en anneau (donut) montre la répartition entre équipements accessibles et inaccessibles.
-- Un graphique en barres compare les temps de réponse (RTT) des dix équipements les plus surveillés.
-- Un graphique de performance temporelle (TimelinePerformance) permet d'explorer l'historique de latence sur les dernières 1h, 6h ou 24h pour chaque équipement.
+- Un graphique en barres compare les temps de réponse (RTT) des équipements.
+- Un graphique de performance temporelle (TimelinePerformance) affiche l'historique de latence réel depuis la base de données, avec filtre par équipement et plage horaire (1h, 6h, 24h).
 
 **Topologie réseau (NetworkTopology)**
 Ce composant propose deux modes de visualisation : une vue en grille qui présente tous les équipements sous forme de tuiles colorées selon leur état, et une vue par sous-réseau qui regroupe les équipements par plage IP. Les nœuds peuvent être animés pour signaler visuellement les équipements actifs. Un panneau latéral affiche les détails d'un équipement sélectionné (IP, RTT, TTL, dernière vérification).
 
 **Tableau de données**
-Un tableau complet liste tous les équipements avec leur adresse IP, leur statut, leur temps de réponse, leur TTL, les éventuels messages d'erreur, et l'horodatage de la dernière vérification.
+Un tableau complet liste tous les équipements avec leur adresse IP, leur statut, leur temps de réponse, leur TTL, les éventuels messages d'erreur, et l'horodatage de la dernière vérification. Le tableau est paginé (15 lignes par page).
 
 **Actualisation automatique**
 Les données sont rechargées toutes les dix secondes sans intervention de l'utilisateur.
@@ -72,12 +72,12 @@ Accessible uniquement aux utilisateurs ayant le rôle `admin`, ce panneau permet
 
 **Onglet Utilisateurs**
 - Vue d'ensemble avec des compteurs : nombre total d'utilisateurs, nombre d'administrateurs, nombre d'équipements, équipements actifs.
-- Tableau des utilisateurs avec recherche par nom ou e-mail.
+- Tableau des utilisateurs paginé (10 lignes par page) avec recherche par nom ou e-mail.
 - Création, modification et suppression de comptes utilisateurs.
 - Pour chaque utilisateur : nom, e-mail, rôle (`admin` ou `operator`), statut actif/inactif, date de dernière connexion.
 
 **Onglet Equipements**
-- Tableau des équipements supervisés avec recherche par nom ou IP.
+- Tableau des équipements supervisés paginé (10 lignes par page) avec recherche par nom ou IP.
 - Création, modification et suppression d'équipements.
 - Import en masse depuis un fichier Excel (`.xlsx`) : un bouton permet de télécharger le modèle vierge, un autre d'importer un fichier rempli avec un retour détaillé (lignes ajoutées, ignorées, erreurs).
 - Export de l'ensemble du référentiel vers un fichier Excel.
@@ -91,6 +91,8 @@ Accessible uniquement aux utilisateurs ayant le rôle `admin`, ce panneau permet
 - **PostgreSQL** pour le stockage persistant
 - **JWT** (`jsonwebtoken`) pour l'authentification sans état
 - **bcryptjs** pour le hachage des mots de passe
+- **express-rate-limit** pour le contrôle du taux de requêtes
+- **pino** + **pino-http** pour le logging structuré JSON
 - **Multer** pour la réception des fichiers uploadés
 - **XLSX** pour la lecture et la génération de fichiers Excel
 
@@ -103,7 +105,7 @@ Accessible uniquement aux utilisateurs ayant le rôle `admin`, ce panneau permet
 
 ### Service de ping
 - **Python 3.11** avec `subprocess` pour l'exécution des commandes ping système
-- **psycopg2** pour l'écriture des résultats en base PostgreSQL
+- **psycopg2** pour la lecture du référentiel et l'écriture des résultats en base PostgreSQL
 - Compatible Windows et Linux
 
 ---
@@ -160,16 +162,18 @@ Comptes utilisateurs de la plateforme.
 
 | Méthode | Route | Description |
 |---------|-------|-------------|
-| POST | `/api/auth/login` | Connexion (retourne un JWT) |
+| POST | `/api/auth/login` | Connexion — rate limité à 10 tentatives / 15 min (retourne un JWT) |
 | GET | `/api/auth/me` | Profil de l'utilisateur connecté |
 
 ### Supervision (public)
 
 | Méthode | Route | Description |
 |---------|-------|-------------|
-| GET | `/api/cibest/equipements` | Statut actuel de tous les équipements |
+| GET | `/api/cibest/equipements` | Dernier statut connu de tous les équipements |
 | GET | `/api/cibest/equipements/status` | Résumé statistique (total, online, offline, uptime) |
-| GET | `/api/cibest/equipements/:id` | Détail d'un équipement par son identifiant |
+| GET | `/api/cibest/equipements/:id` | Détail d'un enregistrement ping par son id |
+| GET | `/api/cibest/history` | Historique RTT d'un équipement — params : `ip`, `range` (1h/6h/24h) |
+| GET | `/api/cibest/history/all` | Historique RTT moyen toutes IP — param : `range` (1h/6h/24h) |
 | GET | `/api/health` | Santé de l'API |
 
 ### Administration (JWT requis + rôle admin)
@@ -204,30 +208,29 @@ Après connexion, l'utilisateur est redirigé automatiquement vers la page corre
 
 ## Service de ping
 
-Le script `pinger/ping_api.py` tourne en continu et effectue un cycle de sondage toutes les cinq minutes. Il interroge l'ensemble des adresses IP définies dans sa configuration (par exemple la plage `10.136.115.60` à `10.136.115.79`, le serveur MDR6, et le serveur IA), puis écrit les résultats en base de données.
+Le script `pinger/ping_api.py` tourne en continu et effectue un cycle de sondage toutes les cinq minutes (configurable via `PING_INTERVAL`). Au début de chaque cycle, il interroge la table `equipements` pour récupérer dynamiquement la liste des équipements actifs (`active = true`). Il n'est donc plus nécessaire de modifier le code pour ajouter ou retirer un équipement : il suffit de le gérer depuis le panneau d'administration.
 
 Pour chaque équipement sondé :
 - Jusqu'à 3 tentatives de ping sont effectuées avant de déclarer l'équipement inaccessible.
-- Le RTT moyen, la valeur TTL et un éventuel message d'erreur sont enregistrés.
+- Le RTT, la valeur TTL et un éventuel message d'erreur sont enregistrés dans `ping_results`.
 - Le script s'adapte automatiquement à Windows (`-n`) et Linux (`-c`).
-
-L'API backend lit systématiquement la dernière entrée de `ping_results` pour chaque IP afin de déterminer l'état courant affiché sur le dashboard.
+- En cas de perte de connexion à la base, le script se reconnecte automatiquement.
 
 ---
 
 ## Déploiement avec Docker
 
-L'application est containerisée via Docker Compose. Deux services sont définis dans `docker-compose.yml` : la base de données PostgreSQL et l'API backend.
+L'application est entièrement containerisée. Le fichier `docker-compose.yml` orchestre trois services : la base PostgreSQL, l'API backend, et le pinger Python.
 
 ```bash
 docker-compose up -d
 ```
 
-La base de données est initialisée automatiquement au premier démarrage à partir du fichier `init.sql`, qui crée les tables et insère le compte administrateur par défaut.
+La base de données démarre avec un healthcheck (`pg_isready`) et les deux autres services attendent qu'elle soit prête avant de démarrer. La base est initialisée automatiquement au premier lancement à partir de `init.sql`.
 
-Le service de ping est packagé séparément (`pinger/Dockerfile`) et peut être lancé indépendamment en lui fournissant les variables de connexion à la base.
+### Variables d'environnement
 
-### Variables d'environnement (backend)
+**Backend**
 
 | Variable | Valeur par défaut | Description |
 |----------|------------------|-------------|
@@ -238,8 +241,29 @@ Le service de ping est packagé séparément (`pinger/Dockerfile`) et peut être
 | `POSTGRES_PASSWORD` | `password` | Mot de passe |
 | `PORT` | `3000` | Port d'écoute de l'API |
 | `JWT_SECRET` | `cibest_secret_key_change_in_production` | Clé de signature JWT |
+| `ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:3000` | Origines CORS autorisées (CSV) |
+| `LOG_LEVEL` | `info` | Niveau de log pino (debug/info/warn/error) |
 
-En production, la valeur de `JWT_SECRET` doit impérativement être remplacée par une clé forte et aléatoire.
+**Pinger**
+
+| Variable | Valeur par défaut | Description |
+|----------|------------------|-------------|
+| `POSTGRES_HOST` | `localhost` | Hôte PostgreSQL |
+| `POSTGRES_PORT` | `5432` | Port PostgreSQL |
+| `POSTGRES_DB` | `cdgxpress` | Nom de la base |
+| `POSTGRES_USER` | `cdgxpress_user` | Utilisateur |
+| `POSTGRES_PASSWORD` | `password` | Mot de passe |
+| `PING_INTERVAL` | `300` | Intervalle entre cycles en secondes |
+
+**Frontend** (fichiers `.env` par environnement)
+
+| Fichier | Variable | Valeur |
+|---------|----------|--------|
+| `.env` | `VITE_API_URL` | `http://localhost:3000` |
+| `.env.preprod` | `VITE_API_URL` | `http://preprod-api.cdgx.local:3000` |
+| `.env.production` | `VITE_API_URL` | `http://api.cdgx.local:3000` |
+
+Pour builder le frontend en mode preprod : `npm run build -- --mode preprod`
 
 ---
 
@@ -272,7 +296,7 @@ L'interface est accessible sur `http://localhost:5173` et l'API sur `http://loca
 ### Service de ping
 
 ```bash
-pip install -r requirements.txt
+pip install -r pinger/requirements.txt
 python pinger/ping_api.py
 ```
 
@@ -294,8 +318,22 @@ Ce compte doit être modifié dès la première mise en service.
 
 ## Points d'attention pour la production
 
-- Remplacer le `JWT_SECRET` par une valeur générée de façon sécurisée.
-- Changer le mot de passe administrateur par défaut.
-- Modifier le mot de passe de la base de données PostgreSQL dans `docker-compose.yml`.
-- L'URL de l'API est actuellement en dur dans le frontend (`http://localhost:3000`) — la paramétrer via une variable d'environnement Vite (`VITE_API_URL`) avant tout déploiement distant.
-- Le mode sombre et certaines préférences utilisateur sont stockés dans le `localStorage` du navigateur, ce qui signifie qu'ils ne sont pas partagés entre appareils.
+- Remplacer `JWT_SECRET` par une valeur forte générée aléatoirement (`openssl rand -hex 32`).
+- Changer le mot de passe administrateur par défaut immédiatement après le premier démarrage.
+- Modifier le mot de passe PostgreSQL dans `docker-compose.yml` et les variables d'environnement associées.
+- Mettre à jour `ALLOWED_ORIGINS` avec les domaines réels du frontend pour restreindre le CORS.
+- Mettre à jour `VITE_API_URL` dans `.env.production` avec l'URL réelle de l'API backend.
+- La table `ping_results` grossit à raison d'un enregistrement par équipement toutes les 5 minutes : prévoir une politique de purge ou d'archivage des données anciennes (ex. suppression des enregistrements de plus de 90 jours).
+- Le mode sombre et certaines préférences utilisateur sont stockés dans le `localStorage` du navigateur et ne sont pas partagés entre appareils.
+
+---
+
+## Ce qui reste à implémenter
+
+Deux intégrations majeures sont prévues et n'ont pas encore été développées :
+
+**Intégration MDR6**
+Le serveur MDR6 remonte les données de présence et d'état des trains. Son IP est supervisée par le pinger (disponibilité réseau uniquement), mais l'intégration applicative — récupération des données trains, modélisation en base, exposition via API et visualisation dans le dashboard — reste à construire. Le protocole exposé par le MDR6 doit être identifié en premier lieu.
+
+**Intégration CVEDIA (serveur IA)**
+Le serveur IA (CVEDIA) produit des données de comptage de passagers à partir des flux caméra. Comme pour le MDR6, seule la disponibilité réseau est actuellement supervisée. L'intégration des données de comptage nécessite de définir l'interface exposée par CVEDIA, de créer le connecteur backend, de modéliser les données en base et de construire la visualisation. Plusieurs composants graphiques sont déjà disponibles dans le frontend et prêts à l'emploi pour cette intégration (AreaChart, LineChart, ComboChart, PieChart).
